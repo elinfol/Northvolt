@@ -15,13 +15,13 @@ sheet <- gs4_get("https://docs.google.com/spreadsheets/d/1iWwUMKtqyEcwFUpJwv5PO1
 
 articles <- read_sheet(sheet, "electrive")
 articles_nv_raw <- read_sheet(sheet, "Northvolt")
-
+annual_reports <- read_sheet(sheet,"Årsredovisningar")
 
 #### Filtering the articles ####
 
 articles_nv <- articles_nv_raw %>% 
   filter(!(comment %in% c("dubblett","out of scope","not relevant","no event","speculation")))  %>%  
-  select(ID, date, Event, Category, comment,`Group 1`, `Group 2`)  %>% 
+  select(ID, date, Event, Category, comment,`Teoretical category`,`Group 1`, `Group 2`)  %>% 
   arrange(date)  %>% 
   mutate(date = as.Date(date),ypos = rep(c(0.3, -0.3), length.out = n()))
 
@@ -111,9 +111,9 @@ ggplot() +
 #ggsave("northvolt_timeline_rise_fall.png", width = 8, height = 5, dpi = 300)
 
 #### Interactive plots ####
-pl <- articles_nv %>% 
-  mutate(`Group 1` = fct_rev(fct_reorder(`Group 1`, date, .fun = min)))%>%
-  ggplot(aes(date, `Group 1`, color = `Group 1`, 
+pl_gr1 <- articles_nv %>% 
+  mutate(`Teoretical category` = fct_rev(fct_reorder(`Teoretical category`, date, .fun = min)))%>%
+  ggplot(aes(date, `Teoretical category`, color = `Teoretical category`, 
              text= str_wrap(Event, 20))) + 
   geom_point(show.legend = F)+
   scale_color_brewer(palette = "Dark2")+
@@ -121,13 +121,28 @@ pl <- articles_nv %>%
   theme_bw() + 
   theme(legend.position = "none")
 
-plotly_pl <- ggplotly(pl, tooltip = "text") %>%
+plotly_pl_gr1 <- ggplotly(pl_gr1, tooltip = "text") %>%
   style(hoverlabel = list(bgcolor = "white"), traces = NULL) %>%
   layout(hoverlabel = list(align = "left"))
-plotly_pl
-#saveWidget(plotly_pl, "northvolt_interactive.html") 
+plotly_pl_gr1
+#saveWidget(plotly_pl_gr1, "northvolt_interactive.html") 
 
+#### Data from annual reports ####
+pl_ar <- annual_reports %>% 
+  mutate(date = as.Date(Date)) %>%
+  arrange(date)  %>%
+  ggplot(aes(date, `Teoretical category`, color = `Teoretical category`, 
+             text= str_wrap(Event, 20))) + 
+  geom_jitter(height = 0.2, width = 0, show.legend = FALSE)+
+  scale_color_brewer(palette = "Dark2")+
+  labs(x = "Date", y = "") + 
+  theme_bw() + 
+  theme(legend.position = "none")
 
+plotly_pl_ar <- ggplotly(pl_ar, tooltip = "text") %>%
+  style(hoverlabel = list(bgcolor = "white"), traces = NULL) %>%
+  layout(hoverlabel = list(align = "left"))
+plotly_pl_ar
 
 
 
