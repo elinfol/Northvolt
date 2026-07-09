@@ -1,0 +1,556 @@
+---
+title: "Northvolt"
+format: html
+editor: visual
+---
+
+## Info
+
+## Libraries
+
+```{r}
+#| echo: false
+library(googlesheets4)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(lubridate)
+library(tidyverse)
+library(plotly)
+library(htmlwidgets)
+library(sf)
+library(rnaturalearth)
+library(gganimate)
+library(ggimage)
+library(shiny)
+library(leaflet)
+library(ggrepel)
+library(cowplot)
+library(patchwork)
+```
+
+## Accessing data from the google sheets
+
+```{r}
+#| echo: false
+gs4_auth(scopes = c("https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"))
+
+sheet <- gs4_get("https://docs.google.com/spreadsheets/d/1iWwUMKtqyEcwFUpJwv5PO1NDM4QgJX9_snzBHYOZpYs/edit?gid=0#gid=0")
+
+articles <- read_sheet(sheet, "electrive")
+articles_nv_raw <- read_sheet(sheet, "Northvolt")
+annual_reports <- read_sheet(sheet,"Årsredovisningar")
+factories_raw <- read_sheet(sheet, "Materialisering")
+```
+
+## Filtering the articles
+
+```{r}
+#| echo: false
+articles_nv <- articles_nv_raw %>% 
+  filter(!(comment %in% c("duplicate","out of scope","speculation")))  %>%  
+  select(ID, date, Event, `In annual reports`, Category, comment,`Theoretical category`,`Group 1`, `Group 2`)  %>% 
+  arrange(date)  %>% 
+  mutate(date = as.Date(date),ypos = rep(c(0.3, -0.3), length.out = n()))
+```
+
+## Electrive
+
+### Interactive timeline plot
+
+#### "Theoretical categories"
+
+```{r}
+pl_teor_cat <- articles_nv %>% 
+  mutate(`Theoretical category` = fct_rev(fct_reorder(`Theoretical category`, date, .fun = min)))%>%
+  ggplot(aes(date, `Theoretical category`, color = `Theoretical category`, 
+             text= str_wrap(Event, 20))) + 
+  geom_point(show.legend = F)+
+  geom_vline(xintercept = as.Date("2024-06-20"), linetype = "dashed", color = "lightgrey") +
+  geom_vline(xintercept = as.Date("2025-03-12"), linetype = "dashed", color = "lightgrey") +
+  scale_color_brewer(palette = "Dark2")+
+  labs(x = "Date", y = "") + 
+  theme_bw() + 
+  theme(legend.position = "none")
+
+plotly_pl_teor_cat <- ggplotly(pl_teor_cat, tooltip = "text") %>%
+  style(hoverlabel = list(bgcolor = "white"), traces = NULL) %>%
+  layout(hoverlabel = list(align = "left"))
+plotly_pl_teor_cat
+#saveWidget(plotly_pl_teor_cat, "northvolt_interactive_theor.html") 
+
+```
+#### 16 Categories
+
+```{r}
+#sorts the categories in alphabetic order for the plot
+articles_nv$Category <- factor(articles_nv$Category,
+  levels = rev(sort(unique(articles_nv$Category))))
+
+ggplot(articles_nv, aes(x = date, y = Category, color = Category)) +
+  geom_point(size = 3) +
+  labs(title = "Northvolt Timeline",
+    x = "Date",
+    y = "Category"  ) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+#ggsave("northvolt_timeline.png", width = 8, height = 5, dpi = 300)
+
+```
+
+#### 7 Categories (Group 1)
+
+```{r}
+#plotting all events on the x-axis
+ggplot(articles_nv, aes(x = date, y = 0, color = `Group 1`)) +
+  geom_point(size = 3) +
+  labs(title = "Northvolt Timeline",
+    x = "Date",
+    y = NULL,
+    color = NULL) +
+  scale_color_brewer(palette = "Dark2")+
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  theme_minimal(base_size = 14) +
+  theme(axis.title.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.line.y = element_blank())
+
+#sorting the events in 2 groups, 2018-2021 & 2022-2026
+articles_nv <- articles_nv  %>% 
+  mutate(period = ifelse(year(date) <= 2021, "2018–2021", "2022–2026"))
+
+ggplot(articles_nv, aes(x = date, y = 0, color = `Group 1`)) +
+  geom_point(size = 3) +
+  facet_wrap(~ period, ncol = 1, scales = "free_x") +
+  labs(title = "Northvolt Timeline",
+    x = "Date",
+    y = NULL,
+    color = NULL) +
+  scale_color_brewer(palette = "Dark2")+
+  theme_minimal(base_size = 14) +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank())+
+  theme(panel.spacing = unit(1, "lines"))
+#ggsave("northvolt_timeline_group1.png", width = 8, height = 5, dpi = 300)
+
+```
+
+#### Rise & Fall (Group 2)
+
+```{r}
+articles_nv$`Group 2` <- factor(articles_nv$`Group 2`,
+  levels = c("Rise", "Neutral", "Fall"))
+
+
+ggplot() +
+  geom_jitter(data = subset(articles_nv, `Group 2` != "Rise"),
+    aes(x = date, y = 0, color = `Group 2`),
+    height = 0, size = 4, alpha = 0.7  ) +
+  geom_jitter(data = subset(articles_nv, `Group 2` == "Rise"),
+    aes(x = date, y = 0, color = `Group 2`),
+    height = 0, size = 4, alpha = 0.7  ) +
+  labs(title = "Northvolt Timeline",
+    x = "Date",
+    y = NULL,
+    color = NULL) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_color_manual(values = c(
+    "Rise"    = "#1b9e77",
+    "Neutral" = "#999999",  
+    "Fall"    = "#d95f02")) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "right",
+    panel.grid.minor = element_blank())
+#ggsave("northvolt_timeline_rise_fall.png", width = 8, height = 5, dpi = 300)
+```
+
+## Annual reports
+
+### Interactive timeline plot
+
+```{r}
+pl_ar <- annual_reports %>% 
+  mutate(date = as.Date(Date),`Theoretical category` = factor(`Theoretical category`,
+           levels = rev(c("Actors", "Money", "Materialization", "Policy", "Discourse", "Knowledge", "Other")))) %>%
+  arrange(date)  %>%
+  ggplot(aes(date, `Theoretical category`, color = `Theoretical category`, 
+             text= str_wrap(Event, 20))) + 
+  geom_jitter(height = 0.2, width = 0, show.legend = FALSE)+
+  geom_vline(xintercept = as.Date("2024-06-20"), linetype = "dashed", color = "lightgrey") +
+  geom_vline(xintercept = as.Date("2025-03-12"), linetype = "dashed", color = "lightgrey") +
+  scale_color_brewer(palette = "Dark2")+
+  labs(x = "Date", y = "") + 
+  theme_bw() + 
+  theme(legend.position = "none")
+
+plotly_pl_ar <- ggplotly(pl_ar, tooltip = "text") %>%
+  style(hoverlabel = list(bgcolor = "white"), traces = NULL) %>%
+  plotly::layout(hoverlabel = list(align = "left"))
+
+plotly_pl_ar
+#saveWidget(plotly_pl_ar, "northvolt_interactive_ar.html")
+
+```
+
+## Factories/Materialization
+
+### Static map
+
+```{r}
+#| echo: false
+#converts all dates into years and reshape the data
+factories <- factories_raw %>%
+  mutate(`First announcement` = year(`First announcement`),
+    Acquisition = year(Acquisition)) %>%
+  pivot_longer(cols = c(
+      `First announcement`,
+      `Start construction`,
+      `Start operation`,
+      Acquisition),
+    names_to = "event_type",
+    values_to = "year") %>%
+  filter(!is.na(year))
+
+#determines the status of the factory (planned, construction, operational)
+latest_status <- factories %>%
+  mutate(status_rank = case_when(
+      event_type == "First announcement" ~ 1,
+      event_type == "Start construction" ~ 2,
+      event_type == "Start operation" ~ 3,
+      event_type == "Acquisition" ~ 3,
+      TRUE ~ NA_real_)) %>%
+  group_by(Name) %>%
+  slice_max(status_rank, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(status = case_when(
+      status_rank == 1 ~ "Planned",
+      status_rank == 2 ~ "Construction",
+      status_rank == 3 ~ "Operational"),
+    status = factor(status,
+      levels = c(
+        "Planned",
+        "Construction",
+        "Operational")))
+
+
+#slightly offset the factories that are located at the same plant
+latest_status <- latest_status %>%
+  mutate(Lon_plot = case_when(
+      Name == "Revolt Ett" ~ Lon + 0.30,
+      Name == "Northvolt Dwa ESS" ~ Lon + 0.25,
+      TRUE ~ Lon),
+    Lat_plot = case_when(
+      Name == "Revolt Ett" ~ Lat + 0.20,
+      Name == "Northvolt Dwa ESS" ~ Lat + 0.20,
+      TRUE ~ Lat))
+
+#split sites between Europe and North America
+europe_sites <- latest_status %>%
+  filter(Lon_plot >= -50)
+
+na_sites <- latest_status %>%
+  filter(Lon_plot < -50)
+
+#world map
+world <- ne_countries(
+  scale = "medium",
+  returnclass = "sf")
+
+#Europe map
+europe_map <- ggplot() +
+  geom_sf(
+    data = world,
+    fill = "#C9DFE0",
+    color = "white",
+    linewidth = 0.2) +
+  geom_point(
+    data = europe_sites,
+    aes(x = Lon_plot, y = Lat_plot, fill = status),
+    shape = 21,
+    size = 4,
+    colour = "black",
+    stroke = 0.5) +
+  geom_text_repel(data = europe_sites,
+    aes(x = Lon_plot, y = Lat_plot, label = Name),
+    size = 3.5,
+    segment.color = "grey70",
+    max.overlaps = Inf) +
+  scale_fill_manual(
+    values = c(
+      "Planned" = "#A6CEE3",
+      "Construction" = "#4F86C6",
+      "Operational" = "#08306B")) +
+  guides(fill = guide_legend(
+      override.aes = list(
+        shape = 21,
+        colour = "black",
+        size = 5))) +
+  coord_sf(xlim = c(-15, 35), ylim = c(35, 72), expand = F) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 11),
+    legend.box.margin = margin(0,0,0,0))
+
+
+#map of North America, used as an inset to the Europe map
+na_map <- ggplot() +
+  geom_sf(data = world,
+    fill = "#C9DFE0",
+    color = "white",
+    linewidth = 0.2) +
+  geom_point(data = na_sites,
+    aes(x = Lon_plot,y = Lat_plot,fill = status),
+    shape = 21,
+    size = 4,
+    colour = "black",
+    stroke = 0.5) +
+  geom_text_repel(
+    data = na_sites,
+    aes(x = Lon_plot, y = Lat_plot, label = Name),
+    size = 3,
+    max.overlaps = Inf) +
+  scale_fill_manual(
+    values = c(
+      "Planned" = "#A6CEE3",
+      "Construction" = "#4F86C6",
+      "Operational" = "#08306B")) +
+  coord_sf(xlim = c(-130, -60), ylim = c(25, 60)) +
+  theme_bw() +
+  theme(legend.position = "none",
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_rect(
+      colour = "#08306B",
+      fill = NA,
+      linewidth = 1))
+
+
+#combining the maps
+final_map <- europe_map +
+  inset_element(na_map,
+    left = 0.0,
+    bottom = 0.60,
+    right = 0.40,
+    top = 1)
+
+final_map
+#save the map
+#ggsave("northvolt_factories_map.png", final_map, width = 14, height = 8, dpi = 300, bg="white")
+```
+
+### Shiny map
+
+```{r}
+
+
+#preparing the data
+factories <- factories_raw %>%
+  mutate(`First announcement` = year(`First announcement`),
+    Acquisition = year(Acquisition)) %>%
+  pivot_longer(cols = c(
+      `First announcement`,
+      `Start construction`,
+      `Start operation`,
+      Acquisition),
+    names_to = "event_type",
+    values_to = "year") %>%
+  filter(!is.na(year)) %>%
+  
+  # Cuberg only appears after acquisition
+  filter(!(Name == "Cuberg" &
+        event_type %in% c(
+          "First announcement",
+          "Start construction",
+          "Start operation")))
+
+years <- sort(unique(factories$year))
+
+# UI
+ui <- fluidPage(
+  titlePanel("Northvolt Materialization"),
+  sliderInput(
+    "year",
+    "Timeline:",
+    min = min(years),
+    max = max(years),
+    value = min(years),
+    step = 1,
+    sep = "",
+    animate = animationOptions(
+      interval = 1500,
+      loop = FALSE
+    )
+  ),
+  
+  tags$div(
+    style = "
+      text-align:center;
+      font-size:28px;
+      font-weight:bold;
+      margin-bottom:15px;
+    ",
+    textOutput("selected_year")),
+  
+  leafletOutput(
+    "map",
+    height = "800px"))
+
+# SERVER
+server <- function(input, output, session) {
+  
+  output$selected_year <- renderText({
+    paste("Year:", input$year)})
+  
+  output$map <- renderLeaflet({
+    
+    leaflet() %>%
+      
+      addProviderTiles(
+        providers$Esri.WorldGrayCanvas) %>%
+      
+      # Europe-focused starting view
+      fitBounds(
+        lng1 = -15,
+        lat1 = 35,
+        lng2 = 40,
+        lat2 = 72) %>%
+      
+      addLegend(position = "topright",
+        colors = c(
+          "#A6CEE3",
+          "#4F86C6",
+          "#08306B"),
+        labels = c(
+          "Planned",
+          "Construction",
+          "Operational"),
+        title = "Status")})
+  
+  observe({
+    
+    status_data <- factories %>%
+      
+      mutate(
+        status_rank = case_when(
+          event_type == "First announcement" ~ 1,
+          event_type == "Start construction" ~ 2,
+          event_type == "Start operation" ~ 3,
+          event_type == "Acqusition" ~ 3)) %>%
+      
+      filter(year <= input$year) %>%
+      
+      group_by(Name) %>%
+      
+      slice_max(
+        status_rank,
+        n = 1,
+        with_ties = FALSE) %>%
+      
+      ungroup() %>%
+      
+      mutate(status = case_when(
+          status_rank == 1 ~ "Planned",
+          status_rank == 2 ~ "Construction",
+          status_rank == 3 ~ "Operational"),
+        
+        color = case_when(
+          status == "Planned" ~ "#A6CEE3",
+          status == "Construction" ~ "#4F86C6",
+          status == "Operational" ~ "#08306B"),
+        
+        # Point placement
+        Lon_plot = case_when(
+          Name == "Revolt Ett" ~ Lon + 0.35,
+          Name == "Northvolt Ett" ~ Lon - 0.35,
+          Name == "Northvolt Dwa ESS" ~ Lon + 0.30,
+          Name == "Northvolt Dwa Industrial" ~ Lon - 0.30,
+          TRUE ~ Lon),
+        
+        Lat_plot = case_when(
+          Name == "Revolt Ett" ~ Lat + 0.15,
+          Name == "Northvolt Ett" ~ Lat - 0.15,
+          Name == "Northvolt Dwa ESS" ~ Lat + 0.10,
+          Name == "Northvolt Dwa Industrial" ~ Lat - 0.10,
+          TRUE ~ Lat),
+        
+        # Label placement
+        Lon_label = case_when(
+          Name == "Revolt Ett" ~ Lon_plot,
+          Name == "Northvolt Ett" ~ Lon_plot,
+          Name == "Northvolt Dwa ESS" ~ Lon_plot,
+          Name == "Northvolt Dwa Industrial" ~ Lon_plot,
+          Name == "Northvolt Drei" ~ Lon_plot - 0.30,
+          TRUE ~ Lon_plot),
+        
+        Lat_label = case_when(
+          Name == "Revolt Ett" ~ Lat_plot + 0.35,
+          Name == "Northvolt Ett" ~ Lat_plot - 0.35,
+          Name == "Northvolt Dwa ESS" ~ Lat_plot + 0.35,
+          Name == "Northvolt Dwa Industrial" ~ Lat_plot - 0.35,
+          Name == "Hydrovolt" ~ Lat_plot - 0.30,
+          Name == "Northvolt Fem" ~ Lat_plot + 0.30,
+          Name == "Northvolt Drei" ~ Lat_plot + 0.35,
+          TRUE ~ Lat_plot + 0.20))
+    
+    if (nrow(status_data) == 0) return()
+    
+    leafletProxy("map") %>%
+      
+      clearMarkers() %>%
+      clearShapes() %>%
+      
+      # Factory points
+      addCircleMarkers(
+        lng = status_data$Lon_plot,
+        lat = status_data$Lat_plot,
+        
+        radius = 8,
+        
+        color = "black",
+        weight = 1,
+        
+        fillColor = status_data$color,
+        fillOpacity = 1,
+        
+        popup = paste0(
+          "<b>", status_data$Name, "</b><br>",
+          "Status: ", status_data$status, "<br>",
+          "Year: ", status_data$year)) %>%
+      
+      # Labels as tiny markers
+      addMarkers(
+        lng = status_data$Lon_label,
+        lat = status_data$Lat_label,
+        
+        icon = icons(
+          iconUrl = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+          iconWidth = 1,
+          iconHeight = 1),
+        
+        label = status_data$Name,
+        
+        labelOptions = labelOptions(
+          noHide = TRUE,
+          textOnly = FALSE,
+          style = list(
+            "background-color" = "rgba(255,255,255,0.75)",
+            "padding" = "2px 4px",
+            "border-radius" = "3px",
+            "font-size" = "12px",
+            "color" = "black",
+            "border" = "none",
+            "box-shadow" = "none")))})}
+
+# RUN APP
+shinyApp(ui, server)
+```
